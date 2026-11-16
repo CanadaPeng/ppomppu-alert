@@ -22,7 +22,7 @@ import urllib.request
 BOARD = os.environ.get("PPOMPPU_BOARD") or "ppomppu"
 PAGES = int(os.environ.get("PPOMPPU_PAGES") or "2")
 KEYWORDS = [k.strip() for k in (os.environ.get("KEYWORDS") or "두유").split(",") if k.strip()]
-REDIRECT_URI = os.environ.get("KAKAO_REDIRECT_URI") or "http://localhost/oauth"
+REDIRECT_URI = os.environ.get("KAKAO_REDIRECT_URI") or "https://example.com/oauth"
 MAX_SEND = 10  # 한 번에 보내는 최대 알림 수
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
