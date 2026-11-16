@@ -22,7 +22,7 @@ import urllib.request
 BOARD = os.environ.get("PPOMPPU_BOARD") or "ppomppu"
 PAGES = int(os.environ.get("PPOMPPU_PAGES") or "2")
 KEYWORDS = [k.strip() for k in (os.environ.get("KEYWORDS") or "두유").split(",") if k.strip()]
-REDIRECT_URI = os.environ.get("KAKAO_REDIRECT_URI") or "https://example.com/oauth"
+REDIRECT_URI = os.environ.get("KAKAO_REDIRECT_URI") or "http://localhost/oauth"
 MAX_SEND = 10  # 한 번에 보내는 최대 알림 수
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -72,22 +72,79 @@ def parse_posts(page_html):
     return {n: t for n, t in posts.items() if t}
 
 
-def fetch_posts():
+RSS_ITEM = re.compile(r"<item\b.*?</item>", re.S | re.I)
+RSS_FIELD = r"<{0}\b[^>]*>(?:\s*<!\[CDATA\[)?(.*?)(?:\]\]>\s*)?</{0}>"
+
+
+def decode(raw):
+    """페이지에 적힌 charset/encoding 대로 디코딩 (없으면 EUC-KR)."""
+    m = re.search(rb"(?:charset|encoding)\s*=\s*[\"']?([\w-]+)", raw[:2000], re.I)
+    enc = m.group(1).decode().lower() if m else "cp949"
+    enc = "cp949" if enc in ("euc-kr", "euckr", "ks_c_5601-1987") else enc
+    try:
+        return raw.decode(enc, errors="replace")
+    except LookupError:
+        return raw.decode("cp949", errors="replace")
+
+
+def get_page(url, referer):
+    return decode(http(url, headers={
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": referer,
+    }))
+
+
+def parse_rss(xml):
+    posts = {}
+    for item in RSS_ITEM.findall(xml):
+        title = re.search(RSS_FIELD.format("title"), item, re.S | re.I)
+        link = re.search(RSS_FIELD.format("link"), item, re.S | re.I)
+        if not (title and link):
+            continue
+        no = urllib.parse.parse_qs(urllib.parse.urlparse(html.unescape(link.group(1).strip())).query).get("no", [""])[0]
+        if no.isdigit():
+            posts[int(no)] = " ".join(html.unescape(TAG.sub(" ", title.group(1))).split())
+    return {n: t for n, t in posts.items() if t}
+
+
+def from_rss():
+    return parse_rss(get_page(f"https://www.ppomppu.co.kr/rss.php?id={BOARD}", "https://www.ppomppu.co.kr/"))
+
+
+def from_mobile():
     posts = {}
     for page in range(1, PAGES + 1):
-        url = f"{board_url()}&page={page}"
-        try:
-            raw = http(url, headers={
-                "User-Agent": UA,
-                "Accept-Language": "ko-KR,ko;q=0.9",
-                "Referer": "https://www.ppomppu.co.kr/",
-            })
-        except urllib.error.HTTPError as e:
-            sys.exit(f"오류: 뽐뿌 접속 실패 (HTTP {e.code}). 접속이 막혔을 수 있습니다.")
-        posts.update(parse_posts(raw.decode("cp949", errors="replace")))
-    if not posts:
-        sys.exit("오류: 글 목록을 하나도 읽지 못했습니다. 접속이 막혔거나 페이지 구조가 바뀌었습니다.")
+        posts.update(parse_posts(get_page(
+            f"https://m.ppomppu.co.kr/new/bbs_list.php?id={BOARD}&page={page}", "https://m.ppomppu.co.kr/")))
     return posts
+
+
+def from_desktop():
+    posts = {}
+    for page in range(1, PAGES + 1):
+        posts.update(parse_posts(get_page(f"{board_url()}&page={page}", "https://www.ppomppu.co.kr/")))
+    return posts
+
+
+def fetch_posts():
+    """RSS → 모바일 목록 → PC 목록 순서로 시도해서 처음 성공한 결과를 사용."""
+    errors = []
+    for name, source in (("RSS", from_rss), ("모바일 목록", from_mobile), ("PC 목록", from_desktop)):
+        try:
+            posts = source()
+        except urllib.error.HTTPError as e:
+            errors.append(f"{name}: HTTP {e.code}")
+            continue
+        except Exception as e:  # 네트워크 오류 등
+            errors.append(f"{name}: {type(e).__name__} {e}")
+            continue
+        if posts:
+            print(f"[{name}]에서 읽었습니다." + (f" (실패: {', '.join(errors)})" if errors else ""))
+            return posts
+        errors.append(f"{name}: 글을 찾지 못함")
+    sys.exit("오류: 뽐뿌 글 목록을 읽지 못했습니다. " + " / ".join(errors))
 
 
 def matched_keyword(title):
