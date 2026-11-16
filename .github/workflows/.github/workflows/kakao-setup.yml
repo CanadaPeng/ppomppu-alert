@@ -1,0 +1,23 @@
+name: 카카오 최초 연결 (1회)
+
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: '카카오 로그인 후 주소창의 code= 뒤 값 (주소 전체를 붙여넣어도 됨)'
+        required: true
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 토큰 발급 및 테스트 메시지
+        env:
+          KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          KAKAO_AUTH_CODE: ${{ inputs.code }}
+        run: python3 ppomppu_alert.py setup
